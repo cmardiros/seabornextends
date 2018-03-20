@@ -5,6 +5,7 @@ import seaborn as sns
 
 from seabornextends.retouch.ax import AxRetoucher
 from seabornextends.retouch.fig import FigRetoucher
+from seabornextends import utils
 
 
 class GridRetoucher(object):
@@ -12,7 +13,7 @@ class GridRetoucher(object):
     Adds refinements to a Seaborn grid with one or more facets (Ax objects).
     """
 
-    def __init__(self, grid):
+    def __init__(self, grid, grid_kws=None):
 
         if not isinstance(grid, sns.FacetGrid):
             msg = "grid must be sns.FacetGrid but is {}".format(type(grid))
@@ -26,6 +27,11 @@ class GridRetoucher(object):
 
         self.axes = [ax for ax in grid.axes.ravel()]
         self.ax_retouchers = [AxRetoucher(ax) for ax in self.axes]
+
+        # a dict with grid params passed to seaborn
+        # e.g. x, y, orient, row, col, hue, estimator, ci
+        # TODO: should we make this a requirement?
+        self.grid_kws = grid_kws or dict()
 
     def set_point_sizes(self,
                         sizes=None,
@@ -149,40 +155,137 @@ class GridRetoucher(object):
                                         value=values[idx],
                                         style_kws=styles_kws[idx])
 
-    def highlight_levels(self, df, category, highlights, axis='xaxis'):
+    def highlight_levels(self,
+                         df,
+                         category,
+                         highlights,
+                         axis='xaxis'):
         """
-        Draw h or v lines to highlight levels in a category
+        Draw h/v lines or bars to highlight one or more levels in a category.
+
+        Example:
+
+        # category is plotted on yaxis (y='country' in factorplot)
+        retoucher.highlight_levels(
+            df=df,
+            category='country',
+            axis='yaxis',
+            highlights=[
+                {'kind': 'bar', 'level_pattern': 'UK', 'color': 'C3'},
+                {'kind': 'line', 'level_pattern': 'Australia', 'color': 'C4'},
+                {'kind': 'capped_line', 'level_pattern': 'US', 'color': 'C9'}
+            ])
+
+        # category is plotted on xaxis (x='country' in factorplot)
+        retoucher.highlight_levels(
+            df=df,
+            category='country',
+            axis='xaxis',
+            highlights=[
+                {'kind': 'bar', 'level_pattern': 'UK', 'color': 'C3'},
+                {'kind': 'line', 'level_pattern': 'Australia', 'color': 'C4'},
+                {'kind': 'capped_line', 'level_pattern': 'US', 'color': 'C9'}
+            ])
+
+        bar / capped line: plot from 0 up to the aggregated value
+        line: plots lines that extend to 100%
         """
 
-        if axis == 'xaxis':
-            draw_aline_f = 'axvline'
-        if axis == 'yaxis':
-            draw_aline_f = 'axhline'
+        # what is the other axis
+        other_axis = utils.other_axis(axis)
+        logging.debug("other_axis: {}".format(other_axis))
+
+        # what column in the df is plotted on this other axis
+        other_axis_column = self.grid_kws[other_axis]
+
+        # the estimator used to summarize the df
+        estimator = self.grid_kws['estimator']
 
         for highlight in highlights:
-            # TODO do we need except for level patterns
-            level_pattern = highlight.get('level_pattern')
+
+            # what kind of highlight will be plotted
+            valid_kinds = ['line', 'bar', 'capped_line']
+            kind = highlight.get('kind') or 'line'
+            if kind not in valid_kinds:
+                raise Exception("kind must be one of {} but is {}".format(
+                    kind,
+                    valid_kinds))
+
+            level_pattern = highlight['level_pattern']
             color = highlight.get('color') or 'r'
-            alpha = highlight.get('alpha') or 0.6
+            alpha = highlight.get('alpha') or 1
             style = highlight.get('style') or 'solid'
             width = highlight.get('width') or 1.5
 
+            # mapping of the functions we will use to highlight
+            mapping = {
+                'line': {
+                    'xaxis': 'axvline',
+                    'yaxis': 'axhline'
+                },
+                'capped_line': {
+                    'xaxis': 'vlines',
+                    'yaxis': 'hlines'
+                },
+                'bar': {
+                    'xaxis': 'bar',
+                    'yaxis': 'barh'
+                }
+            }
+
+            highlighter = mapping[kind][axis]
+
             # get all levels for the plotted category
-            # TODO: what if not category
-            levels = df[category].cat.categories.tolist()
+            try:
+                levels = df[category].cat.categories.tolist()
+            except AttributeError:
+                msg = "'{}' must be a category".format(category)
+                logging.error(msg)
+                raise AttributeError(msg)
+            except Exception:
+                raise
 
             # see which levels match the ones we want to highlight
             # and get their index
-            level_pattern = re.compile(re.escape(level_pattern))
-            matching_levels = [l for l in levels if level_pattern.search(l)]
-            matching_levels_idx = [i for i, l in
-                                   enumerate(levels) if l in matching_levels]
+            logging.debug("level_pattern: {}".format(level_pattern))
+            pattern = re.compile(str(level_pattern))
+            matches = [str(l) for l in levels if pattern.search(str(l))]
+            matches_idx = [i for i, l in enumerate(levels)
+                           if pattern.search(str(l))]
+
+            logging.debug("matches: {}".format(matches))
+            logging.debug("matches_idx: {}".format(matches_idx))
 
             for idx, ax_retoucher in enumerate(self.ax_retouchers):
                 ax = ax_retoucher.ax
-                for level_idx in matching_levels_idx:
-                    getattr(ax, draw_aline_f)(level_idx,
-                                              linestyle=style,
-                                              linewidth=width,
-                                              color=color,
-                                              alpha=alpha)
+                for level_idx in matches_idx:
+
+                    # get all values for the level we wish to highlight
+                    filtered = df[df[category].astype('str').isin(matches)]
+                    values = filtered[other_axis_column]
+                    estimate = estimator(values)
+
+                    if kind == 'line':
+                        getattr(ax, highlighter)(
+                            level_idx,
+                            linestyle=style,
+                            linewidth=width,
+                            color=color,
+                            alpha=alpha)
+
+                    if kind == 'capped_line':
+                        getattr(ax, highlighter)(
+                            level_idx,
+                            0,
+                            estimate,
+                            linestyle=style,
+                            linewidth=width,
+                            color=color,
+                            alpha=alpha)
+
+                    elif kind == 'bar':
+                        getattr(ax, highlighter)(
+                            level_idx,
+                            estimate,
+                            color=color,
+                            alpha=alpha)
