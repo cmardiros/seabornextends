@@ -1,6 +1,14 @@
 import scipy
 
 
+def other_axis(axis='xaxis'):
+
+    if axis in ['xaxis', 'x']:
+        return 'y'
+    elif axis in ['yaxis', 'y']:
+        return 'x'
+
+
 def integrate_line(ax, line_idx=None):
     """
     Get line data from a plot and integrate it using scipy.cumtrapz.
