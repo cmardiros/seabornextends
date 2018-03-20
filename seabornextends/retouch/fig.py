@@ -1,4 +1,5 @@
 import math
+import logging
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
@@ -7,7 +8,7 @@ class FigRetoucher(object):
 
     def __init__(self, fig):
 
-        if not isinstance(grid, mpl.figure.Figure):
+        if not isinstance(fig, mpl.figure.Figure):
             msg = "fig must be mpl.figure.Figure but is {}".format(type(fig))
             logging.error(msg)
             raise ValueError(msg)
