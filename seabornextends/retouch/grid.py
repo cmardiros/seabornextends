@@ -8,9 +8,10 @@ from seabornextends.retouch.fig import FigRetoucher
 from seabornextends import utils
 
 
-class GridRetoucher(object):
+class FacetGridRetoucher(object):
     """
-    Adds refinements to a Seaborn grid with one or more facets (Ax objects).
+    Adds refinements to a Seaborn FacetGrid with
+    one or more facets (Ax objects).
     """
 
     def __init__(self, grid, grid_kws=None):
@@ -289,3 +290,33 @@ class GridRetoucher(object):
                             estimate,
                             color=color,
                             alpha=alpha)
+
+
+class JointGridRetoucher(object):
+    """
+    Adds refinements to a Seaborn JointGrid with
+    one or more facets (Ax objects).
+    """
+
+    def __init__(self, grid, grid_kws=None):
+
+        if not isinstance(grid, sns.JointGrid):
+            msg = "grid must be sns.JointGrid but is {}".format(type(grid))
+            logging.error(msg)
+            raise ValueError(msg)
+
+        self.grid = grid
+
+        self._fig = self.grid.fig
+        self.fig = FigRetoucher(self._fig)
+
+        self.axes = {'joint': grid.ax_joint,
+                     'marg_x': grid.ax_marg_x,
+                     'marg_y': grid.ax_marg_y}
+
+        self.ax_retouchers = {n: AxRetoucher(ax) for n, ax in self.axes.items()}
+
+        # a dict with grid params passed to seaborn
+        # e.g. x, y, orient, row, col, hue, estimator, ci
+        # TODO: should we make this a requirement?
+        self.grid_kws = grid_kws or dict()
